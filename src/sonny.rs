@@ -1,4 +1,5 @@
 use async_std::{self, task};
+use inputbot::KeybdKey::*;
 use inputbot::{KeybdKey, MouseButton, MouseCursor};
 use std::{
     fmt::Debug,
@@ -29,7 +30,9 @@ pub enum MacroState {
     },
     Menu,
     Overworld,
+    Manual,
 }
+use MacroState::*;
 #[derive(Debug, Clone, Copy, Default)]
 pub struct WindowSize {
     left: i32,
@@ -69,12 +72,12 @@ impl Macro {
     }
     pub fn key_pressed(&mut self, key: KeybdKey) {
         match key {
-            KeybdKey::Numpad0Key | KeybdKey::Numrow0Key => {
+            Numpad0Key | Numrow0Key => {
                 self.set_state(MacroState::Neutral);
                 self.center_mouse();
                 return;
             }
-            KeybdKey::ZKey => {
+            ZKey => {
                 if MouseButton::LeftButton.is_pressed() {
                     MouseButton::LeftButton.release();
                     return;
@@ -86,7 +89,7 @@ impl Macro {
                 end_left_click();
                 return;
             }
-            KeybdKey::XKey => {
+            XKey => {
                 let (x, y) = self.to_screen_coords((0.939, 0.076));
                 MouseCursor::move_abs(x, y);
                 left_click();
@@ -95,25 +98,25 @@ impl Macro {
             _ => (),
         }
         match self.state {
-            MacroState::Neutral => match key {
-                KeybdKey::RKey => self.set_state(MacroState::Record),
-                KeybdKey::EKey => {
-                    self.set_state(MacroState::WindowSizePicker);
+            Neutral => match key {
+                RKey => self.set_state(Record),
+                EKey => {
+                    self.set_state(WindowSizePicker);
 
                     let pos = MouseCursor::pos();
                     self.win_size.left = pos.0;
                     self.win_size.top = pos.1;
                     println!("Top left corner: {:?}", pos);
                 }
-                KeybdKey::CKey => self.set_state(MacroState::CornerMove),
-                KeybdKey::BKey => self.set_state(MacroState::BattleChar),
-                KeybdKey::IKey => self.set_state(MacroState::Inventory {
+                CKey => self.set_state(CornerMove),
+                BKey => self.set_state(BattleChar),
+                IKey => self.set_state(Inventory {
                     x: 1,
                     y: 1,
                     selected_col: None,
                 }),
-                KeybdKey::OKey => self.set_state(MacroState::Overworld),
-                KeybdKey::MKey => {
+                OKey => self.set_state(Overworld),
+                MKey => {
                     let (x, y) = self.to_screen_coords(SKIP_TURN_POS);
                     MouseCursor::move_abs(x, y);
                     self.set_state(MacroState::Menu);
@@ -121,14 +124,14 @@ impl Macro {
 
                 _ => (),
             },
-            MacroState::Record => {
+            Record => {
                 println!(
                     "Screen coord:{:?}, Window coord:{:?}",
                     MouseCursor::pos(),
                     self.to_window_coords(MouseCursor::pos())
                 )
             }
-            MacroState::WinSizeSelect => {
+            WinSizeSelect => {
                 let mut buf = String::new();
                 io::stdin().read_line(&mut buf);
                 match buf
@@ -149,8 +152,8 @@ impl Macro {
                 }
                 self.set_state(MacroState::Neutral);
             }
-            MacroState::WindowSizePicker => {
-                if key != KeybdKey::EKey {
+            WindowSizePicker => {
+                if key != EKey {
                     return;
                 }
                 let pos = MouseCursor::pos();
@@ -158,9 +161,9 @@ impl Macro {
                 self.win_size.bottom = pos.1;
                 println!("Bottom right corner: {:?}", pos);
                 self.center_mouse();
-                self.set_state(MacroState::Neutral);
+                self.set_state(Neutral);
             }
-            MacroState::CornerMove => {
+            CornerMove => {
                 let Some(num) = key.get_num() else {
                     return;
                 };
@@ -175,9 +178,9 @@ impl Macro {
                 println!("Corner: {:?}", SIDE[(num - 1) as usize]);
                 MouseCursor::move_abs(x, y);
             }
-            MacroState::BattleAbilitySelect { .. } => {
+            BattleAbilitySelect { .. } => {
                 if key == KeybdKey::BKey {
-                    self.set_state(MacroState::BattleChar);
+                    self.set_state(BattleChar);
                 }
                 let (x, y) = match key.get_num() {
                     Some(1) => (-0.045, 0.065),
@@ -202,7 +205,7 @@ impl Macro {
                     });
                 }
             }
-            MacroState::BattleChar => {
+            BattleChar => {
                 let Some(get_num) = key.get_num() else{
                     return;
                 };
@@ -219,31 +222,31 @@ impl Macro {
                     9 => (0.72, 0.378),
                     _ => return,
                 };
-                let state = MacroState::BattleAbilitySelect { character: get_num };
+                let state = BattleAbilitySelect { character: get_num };
                 let (x, y) = self.to_screen_coords((x, y));
                 MouseCursor::move_abs(x, y);
                 self.set_state(state);
             }
-            MacroState::Inventory {
+            Inventory {
                 mut x,
                 mut y,
                 selected_col,
             } => {
                 let is_arrow_key: bool;
                 match key {
-                    KeybdKey::RightKey => {
+                    RightKey => {
                         x += 1;
                         is_arrow_key = true;
                     }
-                    KeybdKey::LeftKey => {
+                    LeftKey => {
                         x -= 1;
                         is_arrow_key = true;
                     }
-                    KeybdKey::UpKey => {
+                    UpKey => {
                         y -= 1;
                         is_arrow_key = true;
                     }
-                    KeybdKey::DownKey => {
+                    DownKey => {
                         y += 1;
                         is_arrow_key = true;
                     }
@@ -258,14 +261,14 @@ impl Macro {
                 };
                 match selected_col {
                     Some(selected_col) => {
-                        self.set_state(MacroState::Inventory {
+                        self.set_state(Inventory {
                             x: selected_col,
                             y: num,
                             selected_col: None,
                         });
                         self.inventory_set_mouse(selected_col, num);
                     }
-                    None => self.set_state(MacroState::Inventory {
+                    None => self.set_state(Inventory {
                         x,
                         y,
                         selected_col: Some(num),
@@ -286,7 +289,7 @@ impl Macro {
                 //                 std::io::stdout().flush();
                 //                 self.set_state(MacroState::Inventory(None));
             }
-            MacroState::Menu => {
+            Menu => {
                 let Some(tab) = key.get_num()else{
                     return;
                 };
@@ -303,7 +306,7 @@ impl Macro {
                     _ => return,
                 }
             }
-            MacroState::Overworld => {
+            Overworld => {
                 let Some(num)=key.get_num() else {
                     return;
                 };
@@ -317,6 +320,7 @@ impl Macro {
                 }
                 left_click();
             }
+            Manual => {}
         }
     }
     pub fn set_state(&mut self, mode: MacroState) {
@@ -390,76 +394,29 @@ pub trait KeybdKeyExt {
     fn is_alt() -> bool;
     fn get_num(self) -> Option<i32>;
 }
-impl KeybdKeyExt for KeybdKey {
+impl KeybdKeyExt for inputbot::KeybdKey {
     fn is_shift() -> bool {
-        KeybdKey::RShiftKey.is_pressed() || KeybdKey::LShiftKey.is_pressed()
+        RShiftKey.is_pressed() || LShiftKey.is_pressed()
     }
     fn is_ctrl() -> bool {
-        KeybdKey::RControlKey.is_pressed() || KeybdKey::LControlKey.is_pressed()
+        RControlKey.is_pressed() || LControlKey.is_pressed()
     }
     fn is_alt() -> bool {
         KeybdKey::RAltKey.is_pressed() || KeybdKey::LAltKey.is_pressed()
     }
     fn get_num(self) -> Option<i32> {
         match self {
-            KeybdKey::Numpad0Key | KeybdKey::Numrow0Key => Some(0),
-            KeybdKey::Numpad1Key | KeybdKey::Numrow1Key => Some(1),
-            KeybdKey::Numpad2Key | KeybdKey::Numrow2Key => Some(2),
-            KeybdKey::Numpad3Key | KeybdKey::Numrow3Key => Some(3),
-            KeybdKey::Numpad4Key | KeybdKey::Numrow4Key => Some(4),
-            KeybdKey::Numpad5Key | KeybdKey::Numrow5Key => Some(5),
-            KeybdKey::Numpad6Key | KeybdKey::Numrow6Key => Some(6),
-            KeybdKey::Numpad7Key | KeybdKey::Numrow7Key => Some(7),
-            KeybdKey::Numpad8Key | KeybdKey::Numrow8Key => Some(8),
-            KeybdKey::Numpad9Key | KeybdKey::Numrow9Key => Some(9),
+            Numpad0Key | Numrow0Key => Some(0),
+            Numpad1Key | Numrow1Key => Some(1),
+            Numpad2Key | Numrow2Key => Some(2),
+            Numpad3Key | Numrow3Key => Some(3),
+            Numpad4Key | Numrow4Key => Some(4),
+            Numpad5Key | Numrow5Key => Some(5),
+            Numpad6Key | Numrow6Key => Some(6),
+            Numpad7Key | Numrow7Key => Some(7),
+            Numpad8Key | Numrow8Key => Some(8),
+            Numpad9Key | Numrow9Key => Some(9),
             _ => None,
         }
     }
 }
-
-// #[derive(Debug, Clone, Default)]
-// pub struct Neutral {
-//     pub has_pressed: bool,
-//     pub pos: (i32, i32),
-// }
-// #[derive(Debug, Clone, Default)]
-// pub struct Record {}
-// pub trait SonnyFSM {
-//     fn debug(&self);
-//     fn pressed_key(&mut self, key: KeybdKey);
-// }
-// impl SonnyFSM for Neutral {
-//     fn debug(&self) {
-//         println!("Neutral")
-//     }
-//     fn pressed_key(&mut self, key: KeybdKey) {
-//         match key {
-//             KeybdKey::Numpad1Key => {
-//                 if self.has_pressed {
-//                     MouseCursor::move_abs(self.pos.0, self.pos.1);
-//                     *self = Neutral::default();
-//                     return;
-//                 }
-//                 self.has_pressed = true;
-//                 self.pos = MouseCursor::pos();
-//             }
-//             _ => (),
-//         }
-//     }
-// }
-// impl SonnyFSM for Record {
-//     fn debug(&self) {
-//         println!("Record")
-//     }
-//     fn pressed_key(&mut self, key: KeybdKey) {
-//         match key {
-//             KeybdKey::Numpad1Key => {
-//                 println!("{:?}", MouseCursor::pos())
-//             }
-//             KeybdKey::Numpad0Key => {
-//                 Neutral::default();
-//             }
-//             _ => (),
-//         }
-//     }
-// }
