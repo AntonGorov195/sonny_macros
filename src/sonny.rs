@@ -33,6 +33,11 @@ pub enum MacroState {
     ShopInventory {
         x: i32,
         y: i32,
+        selected_col: Option<i32>,
+    },
+    ShopBuy {
+        x: i32,
+        y: i32,
     },
 }
 use MacroState::*;
@@ -82,6 +87,15 @@ const INVENTORY_EQUIPMENT_POS: [(f32, f32); 7] = [
     (0.33, 0.366),
     (0.33, 0.43),
 ];
+const SHOP_EQUIPMENT_POS: [(f32, f32); 7] = [
+    (0.375, 0.2),
+    (0.375, 0.26),
+    (0.375, 0.32),
+    (0.4175, 0.32),
+    (0.57, 0.2),
+    (0.57, 0.26),
+    (0.57, 0.32),
+];
 const SKIP_TURN_POS: (f32, f32) = (0.5, 0.875);
 const MAP_TAB_POS: (f32, f32) = SKIP_TURN_POS;
 const SENSITIVITY: (f32, f32) = (0.01, 0.01);
@@ -107,6 +121,9 @@ const BATTLE_BUFF_OFFSET: (f32, f32) = (0.0225, 0.0622);
 const BATTLE_BUFF_CENTER_POS: (f32, f32) = (0.5, 0.1092);
 const VICTORY_PROCEED: (f32, f32) = (0.5, 0.675);
 const ITEM_DROP_BOX: (f32, f32) = (0.904, 0.666);
+
+const SHOP_SELL_BOX: (f32, f32) = (0.855, 0.666);
+const SHOP_BUY_POS: (f32, f32) = (0.38125, 0.5);
 impl Macro {
     pub fn new() -> Self {
         let mut this = Self {
@@ -169,7 +186,11 @@ impl Macro {
             Neutral => match key {
                 SKey => {
                     self.inventory_set_mouse(1, 1);
-                    self.set_state(ShopInventory { x: 1, y: 1 })
+                    self.set_state(ShopInventory {
+                        x: 1,
+                        y: 1,
+                        selected_col: None,
+                    })
                 }
                 EKey => {
                     //                     if KeybdKey::is_alt() {
@@ -420,6 +441,39 @@ impl Macro {
                     }),
                 }
             }
+            InventoryProfile(mut x) => {
+                let Some(arrow) = KeybdKey::get_arrow() else {
+                    return;
+                };
+                if arrow.1 < 0 {
+                    {
+                        let (x, y) = (x, 6);
+                        self.inventory_set_mouse(x, y);
+                        self.set_state(Inventory {
+                            x,
+                            y,
+                            selected_col: None,
+                        })
+                    };
+                    return;
+                }
+                x += arrow.0;
+                if x == 7 || x == 0 {
+                    self.set_state(Inventory {
+                        x: 6,
+                        y: 7,
+                        selected_col: None,
+                    });
+                    self.move_window_coord(ITEM_DROP_BOX);
+                    return;
+                }
+                self.set_state(InventoryProfile(x));
+                let (x, y) = (
+                    INVENTORY_PROFILE_POS.0 + INVENTORY_PROFILE_OFFSET.0 * (x - 1) as f32,
+                    INVENTORY_PROFILE_POS.1,
+                );
+                self.move_window_coord((x, y));
+            }
             BottomTabs => {
                 let Some(tab) = key.get_num() else{
                     return;
@@ -533,40 +587,100 @@ impl Macro {
                     _ => return,
                 }
             }
-            ShopInventory { x, y } => {
-
-            }
-            InventoryProfile(mut x) => {
-                if let Some(arrow) = KeybdKey::get_arrow() {
-                    if arrow.1 < 0 {
-                        {
-                            let (x, y) = (x, 6);
-                            self.inventory_set_mouse(x, y);
-                            self.set_state(Inventory {
-                                x,
-                                y,
-                                selected_col: None,
-                            })
-                        };
-                        return;
-                    }
-                    x += arrow.0;
-                    if x == 7 || x == 0 {
-                        self.set_state(Inventory {
-                            x: 6,
-                            y: 7,
-                            selected_col: None,
-                        });
-                        self.move_window_coord(ITEM_DROP_BOX);
-                        return;
-                    }
-                    self.set_state(InventoryProfile(x));
-                    let (x, y) = (
-                        INVENTORY_PROFILE_POS.0 + INVENTORY_PROFILE_OFFSET.0 * (x - 1) as f32,
-                        INVENTORY_PROFILE_POS.1,
-                    );
-                    self.move_window_coord((x, y));
+            ShopInventory {
+                mut x,
+                mut y,
+                selected_col,
+            } => {
+                if key == XKey {
+                    self.move_window_coord(CLOSE_MENU_WINDOW);
+                    left_click();
+                    return;
                 }
+                if let Some(arrow) = KeybdKey::get_arrow() {
+                    x += arrow.0;
+                    y += arrow.1;
+
+                    x = wrap(x, 1..10);
+                    if y < 1 {
+                        return;
+                    }
+                    if self.inventory_set_mouse(x, y) {
+                        self.set_state(ShopInventory { x, y, selected_col });
+                        return;
+                    }
+                    let (x1, y1);
+                    match (x, y) {
+                        (6, 7) => {
+                            self.set_state(ShopInventory { x, y, selected_col });
+                            (x1, y1) = ITEM_DROP_BOX;
+                        }
+                        (5, 7) => {
+                            self.set_state(ShopInventory {
+                                x: 5,
+                                y,
+                                selected_col,
+                            });
+                            (x1, y1) = SHOP_SELL_BOX;
+                        }
+                        (_, 7) if arrow.0 == 0 => {
+                            self.set_state(ShopInventory {
+                                x: 5,
+                                y,
+                                selected_col,
+                            });
+                            (x1, y1) = SHOP_SELL_BOX;
+                        }
+                        (_, 7) => return,
+                        (7, y) if y > 3 => {
+                            self.set_state(ShopBuy { x: 1, y: y - 3 });
+                            (x1, y1) = SHOP_BUY_POS;
+                        }
+                        (7, _) => {
+                            y = y.min(3);
+                            y = y.max(1);
+                            self.set_state(ShopInventory { x, y, selected_col });
+                            (x1, y1) = SHOP_EQUIPMENT_POS[(y - 1) as usize];
+                        }
+                        (8, _) => {
+                            y -= arrow.1;
+                            self.set_state(ShopInventory { x, y, selected_col });
+                            (x1, y1) = SHOP_EQUIPMENT_POS[3];
+                        }
+                        (9, _) => {
+                            y = y.min(3);
+                            self.set_state(ShopInventory { x, y, selected_col });
+                            (x1, y1) = SHOP_EQUIPMENT_POS[(y + 3) as usize];
+                        }
+                        _ => return,
+                    }
+                    let (x, y) = self.to_screen_coords((x1, y1));
+                    MouseCursor::move_abs(x, y);
+                    return;
+                }
+                // let Some(num) = key.get_num() else {
+                //     return;
+                // };
+                // match selected_col {
+                //     Some(selected_col) => {
+                //         if !self.inventory_set_mouse(selected_col, num) {
+                //             return;
+                //         }
+                //         self.set_state(ShopInventory {
+                //             x: selected_col,
+                //             y: num,
+                //             selected_col: None,
+                //         });
+                //     }
+                //     None => self.set_state(ShopInventory {
+                //         x,
+                //         y,
+                //         selected_col: Some(num),
+                //     }),
+                // }
+            }
+            ShopBuy { x, y } => {
+
             }
         }
     }
