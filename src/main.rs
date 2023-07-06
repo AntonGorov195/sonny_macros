@@ -9,16 +9,16 @@ use sonny::{Macro, MacroState};
 use std::sync::{Arc, Mutex};
 // use async_std::sync::Mutex;
 // use async_std::sync::Arc;
-use std::time::Duration;
 
 mod sonny;
 mod window;
+// mod macros;
+// use macros::Macro;
 
 fn main() {
     // let mut sonny = Macro::new();
     let og = Arc::new(Mutex::new(Macro::new()));
     let val = og.clone();
-
 
     KeybdKey::bind_all(move |e| {
         // *val.lock().unwrap() = Some(e);
