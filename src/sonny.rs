@@ -15,23 +15,26 @@ pub enum MacroState {
     DebugState,
     // WinSizeSelect,
     // WindowSizePicker,
-    BattleAbilitySelect { character: i32 },
+    BattleAbilitySelect { character: i32, ability: i32 },
     BattleCharacterSelection,
     Inventory { x: i32, y: i32 },
     InventoryEquip { x: i32, y: i32 },
     InventoryProfile(i32),
-    InventoryDrop,
+    InventoryDrop(i32),
     BottomTabs(i32),
-    Infinity,
+    Infinity(i32),
     Manual,
     BuffView,
-    Victory,
+    VictoryLoot { x: i32, y: i32 },
+    VictoryProceed(i32),
+    VictoryInventory { x: i32, y: i32 },
+    VictoryDrop(i32),
     ShopInventory { x: i32, y: i32 },
     ShopEquip { x: i32, y: i32 },
     ShopBuy { x: i32, y: i32 },
     ShopDropSell { x: i32 },
-    AbilityScreen { x: i32, y: i32 },
-    AbilityWheel,
+    AbilityTree { x: i32, y: i32 },
+    AbilityWheel(i32),
     AbilityPointTable(i32),
 }
 use MacroState::*;
@@ -218,8 +221,8 @@ impl Macro {
                         self.set_state(Inventory { x: 1, y: 1 })
                     };
                 }
-                OKey => self.set_state(Infinity),
-                VKey => self.set_state(Victory),
+                OKey => self.set_state(Infinity(1)),
+                VKey => self.set_state(VictoryLoot { x: 1, y: 1 }),
                 TKey => {
                     // self.move_window_coord(MAP_TAB_POS);
                     self.set_state(BottomTabs(6));
@@ -228,7 +231,7 @@ impl Macro {
                     self.set_state(Manual);
                 }
                 AKey => {
-                    self.set_state(AbilityScreen { x: 1, y: 1 });
+                    self.set_state(AbilityTree { x: 1, y: 1 });
                     // self.move_window_coord(ABILITY_TREE_POS);
                 }
                 _ => (),
@@ -283,36 +286,30 @@ impl Macro {
             //     self.center_mouse();
             //     self.set_state(Neutral);
             // }
-            BattleAbilitySelect { character } => {
+            BattleAbilitySelect { character, .. } => {
                 match key {
                     BKey => {
-                        // self.center_mouse();
                         self.set_state(BattleCharacterSelection);
                         return;
                     }
                     VKey => {
-                        self.set_state(Victory);
-                        // self.move_window_coord(VICTORY_SCREEN_ITEMS);
+                        self.set_state(VictoryLoot { x: 1, y: 1 });
                         return;
                     }
                     _ => (),
                 }
-                // self.move_window_coord(BATTLE_CHARCTER_SELECT[character as usize - 1]);
                 // ability select.
                 let Some(num)=key.to_num() else {
                     return;
                 };
-                self.set_state(BattleAbilitySelect { character });
-                self.ability_wheel(num);
-                // let mut times = 1;
-                // if self.should_double_click() {
-                //     times += 1;
-                // }
-                // left_click_repeat(times);
+                self.set_state(BattleAbilitySelect {
+                    character,
+                    ability: num,
+                });
             }
             BattleCharacterSelection => {
                 if key == VKey {
-                    self.set_state(Victory);
+                    self.set_state(VictoryLoot { x: 1, y: 1 });
                     // self.move_window_coord(VICTORY_SCREEN_ITEMS);
                     return;
                 }
@@ -328,17 +325,20 @@ impl Macro {
                         self.set_state(BuffView);
                     }
                     1..=9 => {
-                        self.set_state(BattleAbilitySelect { character: num });
+                        self.set_state(BattleAbilitySelect {
+                            character: num,
+                            ability: 5,
+                        });
                     }
                     _ => return,
                 }
             }
             Inventory { mut x, mut y } => {
                 if key == DKey {
-                    self.set_state(InventoryDrop);
+                    self.set_state(InventoryDrop(x));
                 }
                 if key == VKey {
-                    self.set_state(Victory);
+                    self.set_state(VictoryLoot { x: 1, y: 1 });
                     return;
                 }
                 if key == BackspaceKey {
@@ -360,7 +360,7 @@ impl Macro {
                             self.set_state(Inventory { x, y });
                         }
                         (_, 7) => {
-                            self.set_state(InventoryDrop);
+                            self.set_state(InventoryDrop(x));
                             return;
                         }
                         (..=0, _) => {
@@ -412,18 +412,18 @@ impl Macro {
                 }
                 x += arrow.0;
                 if x == 7 || x == 0 {
-                    self.set_state(InventoryDrop);
+                    self.set_state(InventoryDrop(6));
                     return;
                 }
                 self.set_state(InventoryProfile(x));
             }
-            InventoryDrop => {
+            InventoryDrop(x) => {
                 let Some(arrow)=KeybdKey::get_arrow()else {
                     return;
                 };
                 match arrow {
                     (_, -1) => {
-                        self.set_state(Inventory { x: 6, y: 6 });
+                        self.set_state(Inventory { x: x, y: 6 });
                     }
                     (1, _) => {
                         self.set_state(InventoryProfile(1));
@@ -435,7 +435,7 @@ impl Macro {
                 }
                 return;
             }
-            BottomTabs(x) => {
+            BottomTabs(_) => {
                 let Some(tab) = key.to_num() else{
                     return;
                 };
@@ -459,310 +459,249 @@ impl Macro {
                 //                     _ => return,
                 //                 }
             }
-            //             Infinity => {
-            //                 let Some(num)=key.to_num() else {
-            //                     return;
-            //                 };
-            //                 if num > 6 {
-            //                     return;
-            //                 }
-            //                 let (x, y) = self.to_screen_coords(INFINITY_OVERWORLD[(num - 1) as usize]);
-            //                 MouseCursor::move_abs(x, y);
-            //                 if KeybdKey::is_alt() {
-            //                     return;
-            //                 }
-            //                 left_click();
-            //             }
-            //             Manual => {
-            //                 let (mut x, mut y) = (0., 0.);
-            //                 if LeftKey.is_pressed() {
-            //                     x -= 1.;
-            //                 }
-            //                 if RightKey.is_pressed() {
-            //                     x += 1.;
-            //                 }
-            //                 if UpKey.is_pressed() {
-            //                     y -= 1.;
-            //                 }
-            //                 if DownKey.is_pressed() {
-            //                     y += 1.;
-            //                 }
-            //                 x *= SENSITIVITY.0;
-            //                 y *= SENSITIVITY.1;
-            //                 if KeybdKey::is_alt() {
-            //                     x *= 3.;
-            //                     y *= 3.;
-            //                 }
-            //                 let (x, y) = self.to_screen_coords((x, y));
-            //                 let (x, y) = (x - self.window_bounds.left, y - self.window_bounds.top);
-            //                 MouseCursor::move_rel(x, y);
-            //             }
-            //             BuffView => {
-            //                 if self.arrow_move(BATTLE_BUFF_OFFSET) {
-            //                     return;
-            //                 }
-            //                 let Some(num)=key.to_num() else{
-            //                     return;
-            //                 };
-            //                 match num {
-            //                     2 => {
-            //                         self.center_mouse();
-            //                         self.set_state(BattleCharacterSelection);
-            //                     }
-            //                     8 => return,
-            //                     1..=9 => {
-            //                         self.move_window_coord(BATTLE_FIRST_BUFF_POS[num as usize - 1]);
-            //                     }
-            //                     _ => return,
-            //                 }
-            //             }
-            //             Victory => {
-            //                 if self.arrow_move(INVENTORY_TILE_OFFSET) {
-            //                     return;
-            //                 }
-            //                 match key {
-            //                     VKey => {
-            //                         self.move_window_coord(VICTORY_SCREEN_ITEMS);
-            //                         return;
-            //                     }
-            //                     IKey => {
-            //                         self.inventory_set_mouse(1, 1);
-            //                         self.set_state(Inventory {
-            //                             x: 1,
-            //                             y: 1,
-            //                             selected_col: None,
-            //                         });
-            //                         return;
-            //                     }
-            //                     XKey => {
-            //                         self.move_window_coord(VICTORY_PROCEED);
-            //                         if self.should_double_click() {
-            //                             left_click();
-            //                             return;
-            //                         }
-            //                     }
-            //                     BKey => {
-            //                         self.set_state(BattleCharacterSelection);
-            //                         self.center_mouse();
-            //                         return;
-            //                     }
-            //                     _ => return,
-            //                 }
-            //             }
-            //             ShopInventory {
-            //                 mut x,
-            //                 mut y,
-            //                 selected_col,
-            //             } => {
-            //                 if key == XKey {
-            //                     self.move_window_coord(CLOSE_MENU_WINDOW);
-            //                     left_click();
-            //                     return;
-            //                 }
-            //                 if let Some(arrow) = KeybdKey::get_arrow() {
-            //                     x += arrow.0;
-            //                     y += arrow.1;
-            //
-            //                     // x = wrap(x, 1..10);
-            //                     if y < 1 {
-            //                         return;
-            //                     }
-            //                     if self.inventory_set_mouse(x, y) {
-            //                         self.set_state(ShopInventory { x, y, selected_col });
-            //                         return;
-            //                     }
-            //                     match (x, y) {
-            //                         (6, 7) => {
-            //                             self.set_state(ShopDropSell { x: 6 });
-            //                             self.move_window_coord(INVENTORY_DROP_BOX);
-            //                             return;
-            //                         }
-            //                         (_, 7) => {
-            //                             self.set_state(ShopDropSell { x: x });
-            //                             self.move_window_coord(SHOP_SELL_BOX);
-            //                             return;
-            //                         }
-            //                         (..=0, _) if y > 3 => {
-            //                             self.set_state(ShopBuy { x: 5, y: y - 3 });
-            //                             self.move_window_coord((
-            //                                 SHOP_BUY_POS.0 + INVENTORY_TILE_OFFSET.1 * 3. as f32,
-            //                                 SHOP_BUY_POS.1 + INVENTORY_TILE_OFFSET.1 * (y - 4) as f32,
-            //                             ));
-            //                         }
-            //                         (7.., _) if y > 3 => {
-            //                             self.set_state(ShopBuy { x: 1, y: y - 3 });
-            //                             self.move_window_coord((
-            //                                 SHOP_BUY_POS.0,
-            //                                 SHOP_BUY_POS.1 + INVENTORY_TILE_OFFSET.1 * (y - 4) as f32,
-            //                             ));
-            //                         }
-            //                         (..=0, _) => {
-            //                             let y = y.min(3).max(1);
-            //                             self.set_state(ShopEquip { x: 3, y: y });
-            //                             self.move_window_coord(SHOP_EQUIPMENT_POS[(y + 3) as usize]);
-            //                             return;
-            //                         }
-            //                         (7.., _) => {
-            //                             let y = y.min(3).max(1);
-            //                             self.set_state(ShopEquip { x: 1, y: y });
-            //                             self.move_window_coord(SHOP_EQUIPMENT_POS[(y - 1) as usize]);
-            //                             return;
-            //                         }
-            //                         _ => return,
-            //                     }
-            //                     return;
-            //                 }
-            //             }
-            //             ShopEquip { x, y } => {
-            //                 let Some(arrow) = KeybdKey::get_arrow() else {
-            //                     return;
-            //                 };
-            //                 let (x, y) = (arrow.0 + x, (arrow.1 + y).min(3).max(1));
-            //
-            //                 match x {
-            //                     1 => {
-            //                         self.set_state(ShopEquip { x, y });
-            //                         self.move_window_coord(SHOP_EQUIPMENT_POS[(y - 1) as usize]);
-            //                     }
-            //                     2 => {
-            //                         self.set_state(ShopEquip { x, y });
-            //                         self.move_window_coord(SHOP_EQUIPMENT_POS[3]);
-            //                     }
-            //                     3 => {
-            //                         self.set_state(ShopEquip { x, y });
-            //                         self.move_window_coord(SHOP_EQUIPMENT_POS[(y + 3) as usize]);
-            //                     }
-            //                     ..=0 => {
-            //                         self.set_state(ShopInventory {
-            //                             x: 6,
-            //                             y: y,
-            //                             selected_col: None,
-            //                         });
-            //                         self.inventory_set_mouse(6, y);
-            //                     }
-            //                     4.. => {
-            //                         self.set_state(ShopInventory {
-            //                             x: 1,
-            //                             y: y,
-            //                             selected_col: None,
-            //                         });
-            //                         self.inventory_set_mouse(1, y);
-            //                     }
-            //                 }
-            //             }
-            //             ShopBuy { x, y } => {
-            //                 let Some(arrow)=KeybdKey::get_arrow() else{
-            //                     return;
-            //                 };
-            //                 let (x, y) = (x + arrow.0, y + arrow.1);
-            //                 match (x, y) {
-            //                     (x, _) if x < 1 => {
-            //                         self.set_state(ShopInventory {
-            //                             x: 6,
-            //                             y: y + 3,
-            //                             selected_col: None,
-            //                         });
-            //                         self.inventory_set_mouse(6, y + 3);
-            //                     }
-            //                     (x, _) if x > 5 => {
-            //                         self.set_state(ShopInventory {
-            //                             x: 1,
-            //                             y: y + 3,
-            //                             selected_col: None,
-            //                         });
-            //                         self.inventory_set_mouse(1, y + 3);
-            //                     }
-            //                     _ => {
-            //                         self.set_state(ShopBuy { x, y });
-            //                         self.move_window_coord((
-            //                             SHOP_BUY_POS.0 + INVENTORY_TILE_OFFSET.0 * (x - 1) as f32,
-            //                             SHOP_BUY_POS.1 + INVENTORY_TILE_OFFSET.1 * (y - 1) as f32,
-            //                         ));
-            //                     }
-            //                 }
-            //             }
-            //             ShopDropSell { x } => {
-            //                 let Some(arrow) = KeybdKey::get_arrow() else {
-            //                     return;
-            //                 };
-            //                 match (x, arrow) {
-            //                     (_, (1.., _)) => {
-            //                         self.set_state(ShopDropSell { x: 6 });
-            //                         self.move_window_coord(INVENTORY_DROP_BOX);
-            //                     }
-            //                     (x, (_, ..=-1)) => {
-            //                         self.set_state(ShopInventory {
-            //                             x: x,
-            //                             y: 6,
-            //                             selected_col: None,
-            //                         });
-            //                         self.inventory_set_mouse(x, 6);
-            //                     }
-            //                     (_, (..=-1, _)) => {
-            //                         self.set_state(ShopDropSell { x: 5 });
-            //                         self.move_window_coord(SHOP_SELL_BOX);
-            //                     }
-            //                     _ => (),
-            //                 }
-            //             }
-            //             AbilityScreen { x, y } => {
-            //                 if key == WKey {
-            //                     self.set_state(AbilityWheel);
-            //                     self.move_window_coord(ABILITY_WHEEL_CENTER);
-            //                     return;
-            //                 }
-            //                 let Some(arrow)=KeybdKey::get_arrow() else{
-            //                     return;
-            //                 };
-            //                 let (x, y) = (x + arrow.0, y + arrow.1);
-            //                 match (x, y) {
-            //                     (..=0, _) | (5.., _) | (_, ..=0) | (_, 8..) => {
-            //                         return;
-            //                     }
-            //                     _ => (),
-            //                 }
-            //                 let offset = (
-            //                     ABILITY_TREE_OFFSET.0 * (x - 1) as f32,
-            //                     ABILITY_TREE_OFFSET.1 * (y - 1) as f32,
-            //                 );
-            //                 let pos = (ABILITY_TREE_POS.0 + offset.0, ABILITY_TREE_POS.1 + offset.1);
-            //                 self.move_window_coord(pos);
-            //                 self.set_state(AbilityScreen { x: x, y: y });
-            //             }
-            //             AbilityWheel => {
-            //                 if key == WKey {
-            //                     self.set_state(AbilityPointTable(1));
-            //                     return;
-            //                 }
-            //                 self.move_window_coord(ABILITY_WHEEL_CENTER);
-            //                 // ability select.
-            //                 let Some(num)=key.to_num() else {
-            //                     return;
-            //                 };
-            //                 let (x, y) = ABILITY_WHEEL_OFFSETS[num as usize - 1];
-            //
-            //                 let (x, y) = self.to_screen_coords((x, y));
-            //                 let (x, y) = (x - self.window_bounds.left, y - self.window_bounds.top);
-            //                 MouseCursor::move_rel(x, y);
-            //             }
-            //             AbilityPointTable(x) => {
-            //                 let Some(num) = key.to_num() else {
-            //                     return;
-            //                 };
-            //                 self.move_window_coord((
-            //                     ABILITY_POINTS_POS.0,
-            //                     ABILITY_POINTS_POS.1 + (num - 1) as f32 * ABILITY_POINTS_OFFSET.1,
-            //                 ));
-            //             }
+            Infinity(_) => {
+                let Some(num)=key.to_num() else {
+                    return;
+                };
+                if num > 6 {
+                    return;
+                }
+                self.set_state(Infinity(num));
+            }
+            Manual => {
+                let Some((x, y)) = KeybdKey::get_arrow() else {
+                    return;
+                };
+                let (mut x, mut y) = (x as f32 * SENSITIVITY.0, y as f32 * SENSITIVITY.1);
+                if KeybdKey::is_alt() {
+                    x *= 3.;
+                    y *= 3.;
+                }
+                self.window_bounds.rel_move((x, y));
+            }
+            BuffView => {
+                if self.arrow_move(BATTLE_BUFF_OFFSET) {
+                    return;
+                }
+                let Some(num)=key.to_num() else{
+                    return;
+                };
+                match num {
+                    2 => {
+                        self.set_state(BattleCharacterSelection);
+                    }
+                    8 => return,
+                    1..=9 => {
+                        self.window_bounds
+                            .move_window_coord(BATTLE_FIRST_BUFF_POS[num as usize - 1]);
+                    }
+                    _ => return,
+                }
+            }
+            VictoryLoot { x, y } => {
+                match key {
+                    VKey => {
+                        self.set_state(VictoryLoot { x: 1, y: 1 });
+                        return;
+                    }
+                    IKey => {
+                        self.set_state(Inventory { x: 1, y: 1 });
+                        return;
+                    }
+                    XKey => {
+                        self.set_state(VictoryProceed(x));
+                    }
+                    BKey => {
+                        self.set_state(BattleCharacterSelection);
+                        return;
+                    }
+                    _ => (),
+                }
+
+                let Some(arrow) = KeybdKey::get_arrow() else {
+                    return;
+                };
+                let (x, y) = (arrow.0 + x, arrow.1 + y);
+                if x < 1 || y < 1 {
+                    return;
+                }
+                match (x, y) {
+                    (1..=5, _) | (_, 1..=3) => self.set_state(VictoryLoot { x: x, y: y }),
+                    (6.., _) => self.set_state(VictoryInventory { x: 1, y: y }),
+                    (_, 4..) => self.set_state(VictoryProceed(x)),
+                    _ => return,
+                }
+            }
+            VictoryProceed(x) => {
+                let Some(arrow) = KeybdKey::get_arrow() else {
+                    return;
+                };
+                if arrow.1 < 0 {
+                    self.set_state(VictoryLoot { x: x, y: 3 });
+                    return;
+                }
+            }
+            VictoryInventory { x, y } => {
+                let Some(arrow) = KeybdKey::get_arrow() else {
+                    return;
+                };
+                let (x, y) = (arrow.0 + x, arrow.1 + y);
+                match (x, y) {
+                    (..=0, _) => {
+                        self.set_state(VictoryLoot { x: 5, y: y.min(3) });
+                    }
+                    (_, 7..) => {
+                        self.set_state(VictoryDrop(x));
+                    }
+                    _ => (),
+                }
+            }
+            VictoryDrop(x) => {
+                let Some(arrow) = KeybdKey::get_arrow() else {
+                    return;
+                };
+                match arrow {
+                    (_, -1) => {
+                        self.set_state(VictoryInventory { x, y: 6 });
+                    }
+                    (-1, _) => {
+                        self.set_state(VictoryProceed(5));
+                    }
+                    _ => return,
+                }
+            }
+            ShopInventory { mut x, mut y } => {
+                if key == XKey {
+                    self.window_bounds.move_window_coord(CLOSE_MENU_WINDOW);
+                    left_click();
+                    return;
+                }
+                if let Some(arrow) = KeybdKey::get_arrow() {
+                    x += arrow.0;
+                    y += arrow.1;
+
+                    match (x, y) {
+                        (_, ..=0) => return,
+                        (1..=6, 1..=6) => {
+                            self.set_state(ShopInventory { x, y });
+                        }
+                        (_, 7..) => {
+                            self.set_state(ShopDropSell { x });
+                            return;
+                        }
+                        (..=0, _) => {
+                            let y = y.min(3).max(1);
+                            self.set_state(InventoryEquip { x: 3, y: y });
+                            return;
+                        }
+                        (7.., _) => {
+                            let y = y.min(3).max(1);
+                            self.set_state(InventoryEquip { x: 1, y: y });
+                            return;
+                        }
+                    }
+                }
+            }
+            ShopEquip { x, y } => {
+                let Some(arrow) = KeybdKey::get_arrow() else {
+                    return;
+                };
+                let (x, y) = (arrow.0 + x, (arrow.1 + y).min(3).max(1));
+
+                match x {
+                    1 => {
+                        self.set_state(ShopEquip { x, y });
+                    }
+                    2 => {
+                        self.set_state(ShopEquip { x, y });
+                    }
+                    3 => {
+                        self.set_state(ShopEquip { x, y });
+                    }
+                    ..=0 => {
+                        self.set_state(ShopInventory { x: 6, y: y });
+                    }
+                    4.. => {
+                        self.set_state(ShopInventory { x: 1, y: y });
+                    }
+                }
+            }
+            ShopBuy { x, y } => {
+                let Some(arrow)=KeybdKey::get_arrow() else{
+                    return;
+                };
+                let (x, y) = (x + arrow.0, y + arrow.1);
+                match (x, y) {
+                    (x, _) if x < 1 => {
+                        self.set_state(ShopInventory { x: 6, y: y + 3 });
+                    }
+                    (x, _) if x > 5 => {
+                        self.set_state(ShopInventory { x: 1, y: y + 3 });
+                    }
+                    _ => {
+                        self.set_state(ShopBuy { x, y });
+                    }
+                }
+            }
+            ShopDropSell { x } => {
+                let Some(arrow) = KeybdKey::get_arrow() else {
+                    return;
+                };
+                match arrow {
+                    (1.., _) => {
+                        self.set_state(ShopDropSell { x: 6 });
+                    }
+                    (_, ..=-1) => {
+                        self.set_state(ShopInventory { x: x, y: 6 });
+                    }
+                    (..=-1, _) => {
+                        self.set_state(ShopDropSell { x: 5 });
+                    }
+                    _ => (),
+                }
+            }
+            AbilityTree { x, y } => {
+                if key == WKey {
+                    self.set_state(AbilityWheel(5));
+                    return;
+                }
+                let Some(arrow)=KeybdKey::get_arrow() else{
+                                return;
+                            };
+                let (x, y) = (x + arrow.0, y + arrow.1);
+                match (x, y) {
+                    (..=0, _) | (5.., _) | (_, ..=0) | (_, 8..) => {
+                        return;
+                    }
+                    _ => (),
+                }
+                self.set_state(AbilityTree { x: x, y: y });
+            }
+            AbilityWheel(_) => {
+                if key == WKey {
+                    self.set_state(AbilityPointTable(1));
+                    return;
+                }
+                self.window_bounds.move_window_coord(ABILITY_WHEEL_CENTER);
+                // ability select.
+                let Some(num)=key.to_num() else {
+                    return;
+                };
+                self.set_state(AbilityWheel(num));
+            }
+            AbilityPointTable(_) => {
+                let Some(num) = key.to_num() else {
+                    return;
+                };
+                self.set_state(AbilityPointTable(num));
+            }
             _ => (),
         }
     }
 
     fn ability_wheel(&mut self, num: i32) {
         let (x, y) = ABILITY_WHEEL_OFFSETS[num as usize - 1];
-        let (x, y) = self.to_screen_coords((x, y));
-        let (x, y) = (x - self.window_bounds.left, y - self.window_bounds.top);
-        MouseCursor::move_rel(x, y);
+        self.window_bounds.rel_move((x, y));
     }
     // fn move_to_shop_sell(&mut self, x: i32) {
     //     if x == 6 {
@@ -774,7 +713,7 @@ impl Macro {
     fn arrow_move(&mut self, offset: (f32, f32)) -> bool {
         if let Some(arrow) = KeybdKey::get_arrow() {
             let (x, y) = (arrow.0 as f32 * offset.0, arrow.1 as f32 * offset.1);
-            self.rel_move((x, y));
+            self.window_bounds.rel_move((x, y));
             return true;
         }
         false
@@ -798,11 +737,6 @@ impl Macro {
         }
         left_click()
     }
-    fn rel_move(&mut self, (x, y): (f32, f32)) {
-        let (x, y) = self.to_screen_coords((x, y));
-        let (x, y) = (x - self.window_bounds.left, y - self.window_bounds.top);
-        MouseCursor::move_rel(x, y);
-    }
 
     fn window_size(&self) -> (i32, i32) {
         self.window_bounds.window_size()
@@ -821,6 +755,11 @@ impl Macro {
     // }
 }
 impl WindowBound {
+    pub fn rel_move(&self, (x, y): (f32, f32)) {
+        let (x, y) = self.to_screen_coords((x, y));
+        let (x, y) = (x - self.left, y - self.top);
+        MouseCursor::move_rel(x, y);
+    }
     pub fn move_window_coord(&self, coord: (f32, f32)) {
         let (x, y) = self.to_screen_coords(coord);
         MouseCursor::move_abs(x, y);
@@ -854,15 +793,28 @@ impl MacroState {
     pub fn move_mouse(&self, window: WindowBound) {
         match *self {
             Neutral => window.center_mouse(),
+            Infinity(x) => {
+                window.move_window_coord(INFINITY_OVERWORLD[(x - 1) as usize]);
+            }
             BuffView => {
                 window.move_window_coord(BATTLE_BUFF_CENTER_POS);
             }
-            BattleAbilitySelect { character } => {
+            BattleAbilitySelect { character, ability } => {
                 window.move_window_coord(BATTLE_CHARCTER_SELECT[character as usize - 1]);
+                window.rel_move(ABILITY_WHEEL_OFFSETS[ability as usize - 1]);
             }
-            Victory => window.move_window_coord(VICTORY_SCREEN_ITEMS),
+            VictoryLoot { x, y } => {
+                window.move_window_coord(VICTORY_SCREEN_ITEMS);
+                window.rel_move(offset((x, y), INVENTORY_TILE_OFFSET));
+            }
+            VictoryProceed(_) => {
+                window.move_window_coord(VICTORY_PROCEED);
+            }
+            VictoryInventory { x, y } => {
+                window.move_window_coord(INVENTORY_POS);
+                window.rel_move(offset((x, y), INVENTORY_TILE_OFFSET));
+            }
             BattleCharacterSelection => window.center_mouse(),
-            AbilityScreen { x, y } => window.move_window_coord(ABILITY_TREE_POS),
             BottomTabs(x) => match x {
                 7 => {
                     window.move_window_coord(EXIT_GAME_X);
@@ -876,7 +828,10 @@ impl MacroState {
                 }
                 _ => return,
             },
-            Inventory { x, y } => Self::inventory_set_mouse(x, y, window),
+            Inventory { x, y } => {
+                window.move_window_coord(INVENTORY_POS);
+                window.rel_move(offset((x, y), INVENTORY_TILE_OFFSET));
+            }
             InventoryEquip { x, y } => match x {
                 1 => {
                     window.move_window_coord(INVENTORY_EQUIPMENT_POS[(y - 1) as usize]);
@@ -891,27 +846,59 @@ impl MacroState {
                 _ => return,
             },
             InventoryProfile(x) => {
-                let (x, y) = (
-                    INVENTORY_PROFILE_POS.0 + INVENTORY_PROFILE_OFFSET_X * (x - 1) as f32,
-                    INVENTORY_PROFILE_POS.1,
-                );
-                window.move_window_coord((x, y));
+                window.move_window_coord(INVENTORY_PROFILE_POS);
+                window.rel_move(offset((x, 0), (INVENTORY_PROFILE_OFFSET_X, 0.)));
             }
-            InventoryDrop => {
+            InventoryDrop(_) => {
                 window.move_window_coord(INVENTORY_DROP_BOX);
             }
-            ShopInventory { x, y } => Self::inventory_set_mouse(x, y, window),
+            ShopInventory { x, y } => {
+                window.move_window_coord(INVENTORY_POS);
+                window.rel_move(offset((x, y), INVENTORY_TILE_OFFSET));
+            }
+            ShopBuy { x, y } => {
+                window.move_window_coord((
+                    SHOP_BUY_POS.0 + INVENTORY_TILE_OFFSET.0 * (x - 1) as f32,
+                    SHOP_BUY_POS.1 + INVENTORY_TILE_OFFSET.1 * (y - 1) as f32,
+                ));
+            }
+            ShopEquip { x, y } => match x {
+                1 => {
+                    window.move_window_coord(SHOP_EQUIPMENT_POS[(y - 1) as usize]);
+                }
+                2 => {
+                    window.move_window_coord(SHOP_EQUIPMENT_POS[3]);
+                }
+                3 => {
+                    window.move_window_coord(SHOP_EQUIPMENT_POS[(y + 3) as usize]);
+                }
+                _ => return,
+            },
+            ShopDropSell { x } => {
+                if x == 6 {
+                    window.move_window_coord(INVENTORY_DROP_BOX);
+                    return;
+                }
+                window.move_window_coord(SHOP_SELL_BOX);
+            }
+            AbilityTree { x, y } => {
+                window.move_window_coord(ABILITY_TREE_POS);
+                window.rel_move(offset((x, y), ABILITY_TREE_OFFSET));
+            }
+            AbilityWheel(ability) => {
+                window.move_window_coord(ABILITY_WHEEL_CENTER);
+                window.rel_move(ABILITY_WHEEL_OFFSETS[ability as usize - 1]);
+            }
             DebugState | Manual => (),
             _ => (),
         }
     }
-    pub fn inventory_set_mouse(x: i32, y: i32, win: WindowBound) {
-        let (x, y) = (
-            INVENTORY_TILE_OFFSET.0 * (x - 1) as f32 + INVENTORY_POS.0,
-            INVENTORY_TILE_OFFSET.1 * (y - 1) as f32 + INVENTORY_POS.1,
-        );
-        win.move_window_coord((x, y));
-    }
+}
+fn offset(steps: (i32, i32), offset: (f32, f32)) -> (f32, f32) {
+    (
+        offset.0 * (steps.0 as f32 - 1.),
+        offset.1 * (steps.1 as f32 - 1.),
+    )
 }
 fn left_click() {
     MouseButton::LeftButton.press();
