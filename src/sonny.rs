@@ -36,6 +36,9 @@ pub enum MacroState {
     AbilityTree { x: i32, y: i32 },
     AbilityWheel(i32),
     AbilityPointTable(i32),
+    // Try predict where abilities will be with a timer.
+    AbilitySelect { x: i32 },
+    AbilitySelectSlider(i32),
 }
 use MacroState::*;
 #[derive(Debug, Clone, Copy, Default)]
@@ -136,6 +139,12 @@ const ABILITY_WHEEL_OFFSETS: [(f32, f32); 9] = [
 ];
 const ABILITY_POINTS_POS: (f32, f32) = (0.415, 0.6);
 const ABILITY_POINTS_OFFSET: (f32, f32) = (0., 0.03);
+const ABILITY_SELECT_SENSETIVITY: f32 = 0.02;
+const ABILITY_SELECT_POS: (f32, f32) = (0.696, 0.5277);
+const ABILITY_SELECT_OFFSET: (f32, f32) = (0.09875, 0.062);
+const ABILITY_SELECT_SLIDER_POS: (f32, f32) = (0.905, 0.5411765);
+const ABILITY_SELECT_SLIDER_OFFSET: (f32, f32) = (0., 0.0975);
+
 const SHOP_SELL_BOX: (f32, f32) = (0.855, 0.666);
 const SHOP_BUY_POS: (f32, f32) = (0.38125, 0.5);
 impl Macro {
@@ -689,13 +698,51 @@ impl Macro {
                 };
                 self.set_state(AbilityWheel(num));
             }
-            AbilityPointTable(_) => {
-                let Some(num) = key.to_num() else {
+            AbilityPointTable(num) => {
+                if key == WKey {
+                    self.window_bounds.move_window_coord(ABILITY_SELECT_POS);
+                    self.set_state(AbilitySelect { x: 1 });
+                    return;
+                }
+                match (key.to_num(), KeybdKey::get_arrow()) {
+                    (_, Some((_, y))) if (1..5).contains(&(y + num)) => {
+                        self.set_state(AbilityPointTable(y + num));
+                    }
+                    (Some(num), _) if num < 5 => self.set_state(AbilityPointTable(num)),
+                    _ => return,
+                }
+            }
+            AbilitySelect { x } => {
+                let Some(arrow) = KeybdKey::get_arrow() else {
                     return;
                 };
-                self.set_state(AbilityPointTable(num));
+                let mut y = arrow.1 as f32 * ABILITY_SELECT_OFFSET.1;
+                if KeybdKey::is_alt() {
+                    y /= 3.;
+                }
+                self.window_bounds.rel_move((0., y));
+                let x = x + arrow.0;
+                match x {
+                    3.. => {
+                        self.set_state(AbilitySelectSlider(1));
+                    }
+                    1 | 2 => {
+                        self.set_state(AbilitySelect { x: x });
+                    }
+                    _ => return,
+                }
             }
-            _ => (),
+            AbilitySelectSlider(y) => {
+                let Some(arrow) = KeybdKey::get_arrow() else {
+                    return;
+                };
+                let y = y + arrow.1;
+                match y {
+                    1 => self.set_state(AbilitySelectSlider(1)),
+                    2 => self.set_state(AbilitySelectSlider(2)),
+                    _ => return,
+                }
+            }
         }
     }
 
@@ -814,6 +861,9 @@ impl MacroState {
                 window.move_window_coord(INVENTORY_POS);
                 window.rel_move(offset((x, y), INVENTORY_TILE_OFFSET));
             }
+            VictoryDrop(_) => {
+                window.move_window_coord(INVENTORY_DROP_BOX);
+            }
             BattleCharacterSelection => window.center_mouse(),
             BottomTabs(x) => match x {
                 7 => {
@@ -888,6 +938,21 @@ impl MacroState {
             AbilityWheel(ability) => {
                 window.move_window_coord(ABILITY_WHEEL_CENTER);
                 window.rel_move(ABILITY_WHEEL_OFFSETS[ability as usize - 1]);
+            }
+            AbilityPointTable(y) => {
+                window.move_window_coord(ABILITY_POINTS_POS);
+                let y = ABILITY_POINTS_OFFSET.1 * (y as f32 - 1.);
+                window.rel_move((0., y));
+            }
+            AbilitySelect { x } => {
+                let (_, y) = window.to_window_coords(MouseCursor::pos());
+                let x = ABILITY_SELECT_POS.0 + ABILITY_SELECT_OFFSET.0 * (x as f32 - 1.);
+                window.move_window_coord((x, y));
+            }
+            AbilitySelectSlider(y) => {
+                window.move_window_coord(ABILITY_SELECT_SLIDER_POS);
+                let y = ABILITY_SELECT_SLIDER_OFFSET.1 * (y as f32 - 1.);
+                window.rel_move((0., y));
             }
             DebugState | Manual => (),
             _ => (),
