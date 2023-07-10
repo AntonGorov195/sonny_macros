@@ -1,11 +1,12 @@
 #![windows_subsystem = "console"]
+#![allow(unused)]
 
 use async_std::{self, task};
 use inputbot::{
     KeybdKey::{self, *},
     MouseButton::*,
 };
-use sonny::{Macro, MacroState};
+use sonny::{Macro, MacroMode};
 use std::sync::{Arc, Mutex};
 // use async_std::sync::Mutex;
 // use async_std::sync::Arc;

@@ -1,30 +1,40 @@
 use async_std::{self, task};
 use inputbot::KeybdKey::*;
 use inputbot::{KeybdKey, MouseButton, MouseCursor};
+use std::array;
 use std::{fmt::Debug, time::Duration};
 
 pub struct Macro {
+    mode: MacroMode,
     state: MacroState,
     window_bounds: WindowBound,
     saved_pos: (f32, f32),
-    auto_left_click: bool,
 }
 #[derive(Debug, Clone, Copy)]
-pub enum MacroState {
+pub enum MacroMode {
     Neutral,
     DebugState,
+    Manual,
+    LanguagePicker(i32),
+    StartMenu(i32),
+    LoadType(i32),
+    LoadCharacterSelecter(i32),
+    NewCharacterSelect(i32),
+    EnterName(i32),
+    Map(i32),
+    WhiteNovember(i32),
+    GhostBeach(i32),
+    Infinity(i32),
     // WinSizeSelect,
     // WindowSizePicker,
     BattleAbilitySelect { character: i32, ability: i32 },
     BattleCharacterSelection,
+    BuffView,
     Inventory { x: i32, y: i32 },
     InventoryEquip { x: i32, y: i32 },
     InventoryProfile(i32),
     InventoryDrop(i32),
     BottomTabs(i32),
-    Infinity(i32),
-    Manual,
-    BuffView,
     VictoryLoot { x: i32, y: i32 },
     VictoryProceed(i32),
     VictoryInventory { x: i32, y: i32 },
@@ -36,11 +46,16 @@ pub enum MacroState {
     AbilityTree { x: i32, y: i32 },
     AbilityWheel(i32),
     AbilityPointTable(i32),
-    // Try predict where abilities will be with a timer.
     AbilitySelect { x: i32 },
     AbilitySelectSlider(i32),
 }
-use MacroState::*;
+use MacroMode::*;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MacroState {
+    Normal,
+    Paused,
+    Console,
+}
 #[derive(Debug, Clone, Copy, Default)]
 pub struct WindowBound {
     pub left: i32,
@@ -48,6 +63,8 @@ pub struct WindowBound {
     pub right: i32,
     pub bottom: i32,
 }
+use KeybdKey::BKey as Back;
+use KeybdKey::NKey as Next;
 const SIDE: [(i32, i32); 9] = [
     (-1, 1),
     (0, 1),
@@ -59,6 +76,22 @@ const SIDE: [(i32, i32); 9] = [
     (0, -1),
     (1, -1),
 ];
+const LANGUAGE_POS: [(f32, f32); 2] = [(0.5, 0.422), (0.5, 0.576)];
+const START_MENU: [(f32, f32); 3] = [
+    (0.48625, 0.6184874),
+    (0.48375, 0.7277311),
+    (0.485, 0.77983195),
+];
+const BACK_BUTTON: (f32, f32) = (0.95, 0.95);
+const GAME_LOAD_TYPE: [(f32, f32); 3] = [(0.5, 0.6), (0.5, 0.7), BACK_BUTTON];
+const SAVE_SELECT: [(f32, f32); 5] = [
+    (0.35, 0.366),
+    (0.35, 0.46),
+    (0.35, 0.56),
+    (0.35, 0.65),
+    BACK_BUTTON,
+];
+const ENTER_NAME_HERE: [(f32, f32); 3] = [(0.5, 0.475), (0.5, 0.617), BACK_BUTTON];
 const INFINITY_OVERWORLD: [(f32, f32); 6] = [
     (0.553, 0.58), //b
     (0.75, 0.63),  //t
@@ -100,7 +133,7 @@ const SHOP_EQUIPMENT_POS: [(f32, f32); 7] = [
 ];
 const SKIP_TURN_POS: (f32, f32) = (0.5, 0.875);
 const MAP_TAB_POS: (f32, f32) = SKIP_TURN_POS;
-const SENSITIVITY: (f32, f32) = (0.01, 0.01);
+const SENSITIVITY: (f32, f32) = (0.02, 0.02);
 const INVENTORY_POS: (f32, f32) = (0.665, 0.2135);
 const INVENTORY_TILE_OFFSET: (f32, f32) = (0.0472, 0.0648);
 const INVENTORY_PROFILE_POS: (f32, f32) = (0.0925, 0.669);
@@ -139,29 +172,68 @@ const ABILITY_WHEEL_OFFSETS: [(f32, f32); 9] = [
 ];
 const ABILITY_POINTS_POS: (f32, f32) = (0.415, 0.6);
 const ABILITY_POINTS_OFFSET: (f32, f32) = (0., 0.03);
-const ABILITY_SELECT_SENSETIVITY: f32 = 0.02;
 const ABILITY_SELECT_POS: (f32, f32) = (0.696, 0.5277);
 const ABILITY_SELECT_OFFSET: (f32, f32) = (0.09875, 0.062);
 const ABILITY_SELECT_SLIDER_POS: (f32, f32) = (0.905, 0.5411765);
 const ABILITY_SELECT_SLIDER_OFFSET: (f32, f32) = (0., 0.0975);
-
 const SHOP_SELL_BOX: (f32, f32) = (0.855, 0.666);
 const SHOP_BUY_POS: (f32, f32) = (0.38125, 0.5);
+const MAP: [(f32, f32); 4] = [
+    (0.16875, 0.74118),
+    (0.47, 0.7311),
+    (0.5975, 0.281),
+    (0.8938, 0.739),
+];
 impl Macro {
     pub fn new() -> Self {
         println!("Neutral State");
         Self {
             window_bounds: Default::default(),
-            state: MacroState::Neutral,
+            mode: MacroMode::Neutral,
             saved_pos: (0.5, 0.5),
-            auto_left_click: false,
+            state: MacroState::Normal,
         }
     }
     pub fn key_pressed(&mut self, key: KeybdKey) {
+        macro_rules! select_menu {
+            ($name:ident,$num:ident,$key:ident,$range:expr,$next:expr,$back:expr) => {
+                if $key == Next {
+                    $next
+                    return;
+                }
+                if key == Back {
+                    $back
+                    return;
+                }
+                if let Some($num) = $key.to_num() {
+                    if (1..=2).contains(&$num) == false {
+                        return;
+                    }
+                    self.set_mode($name($num));
+                    return;
+                }
+                let Some(arrow)=KeybdKey::get_arrow() else {
+                                return;
+                            };
+                let $num = $num + arrow.1;
+                self.set_mode($name($num.min(*$range.end()).max(*$range.start())));
+            };
+        }
+
         self.window_bounds = crate::window::get_window_size();
+
         match key {
-            Numpad0Key | Numrow0Key => {
-                self.set_state(MacroState::Neutral);
+            F2Key => {
+                self.state = MacroState::Paused;
+            }
+            F1Key => {
+                self.state = MacroState::Normal;
+            }
+            _ if self.state == MacroState::Paused => {
+                return;
+            }
+            Numrow0Key | Numpad0Key => {
+                self.set_mode(MacroMode::Neutral);
                 return;
             }
             ZKey => {
@@ -170,13 +242,13 @@ impl Macro {
                     return;
                 }
                 MouseButton::LeftButton.press();
-                if KeybdKey::CapsLockKey.is_toggled() {
+                if KeybdKey::XKey.is_pressed() {
                     return;
                 }
                 end_left_click();
                 return;
             }
-            RKey => {
+            QKey => {
                 if KeybdKey::is_alt() {
                     let pos = self.to_screen_coords(self.saved_pos);
                     println!(
@@ -195,60 +267,24 @@ impl Macro {
                 self.saved_pos = pos;
                 return;
             }
-            // XKey => {
-            //     let (x, y) = self.to_screen_coords((0.939, 0.076));
-            //     MouseCursor::move_abs(x, y);
-            //     left_click();
-            //     return;
-            // }
             _ => (),
         }
-        match self.state {
+        match self.mode {
             Neutral => match key {
-                SKey => {
-                    // self.inventory_set_mouse(1, 1);
-                    self.set_state(ShopInventory { x: 1, y: 1 })
-                }
-                EKey => {
-                    //                     if KeybdKey::is_alt() {
-                    //                         self.win_bounds = crate::window::get_window_size();
-                    //                         println!("{:?}", self.win_bounds);
-                    //                         return;
-                    //                     }
-                    //                     self.set_state(WindowSizePicker);
-                    //
-                    //                     let pos = MouseCursor::pos();
-                    //                     self.win_bounds.left = pos.0;
-                    //                     self.win_bounds.top = pos.1;
-                    //                     println!("Top left corner: {:?}", pos);
-                }
-                RBracketKey => self.set_state(DebugState),
-                BKey => self.set_state(BattleCharacterSelection),
-                IKey => {
-                    {
-                        // self.inventory_set_mouse(1, 1);
-                        self.set_state(Inventory { x: 1, y: 1 })
-                    };
-                }
-                OKey => self.set_state(Infinity(1)),
-                VKey => self.set_state(VictoryLoot { x: 1, y: 1 }),
+                RBracketKey => self.set_mode(DebugState),
                 TKey => {
-                    // self.move_window_coord(MAP_TAB_POS);
-                    self.set_state(BottomTabs(6));
+                    self.set_mode(BottomTabs(6));
                 }
                 UKey => {
-                    self.set_state(Manual);
+                    self.set_mode(Manual);
                 }
-                AKey => {
-                    self.set_state(AbilityTree { x: 1, y: 1 });
-                    // self.move_window_coord(ABILITY_TREE_POS);
-                }
+                LKey => self.set_mode(LanguagePicker(1)),
                 _ => (),
             },
             DebugState => {
                 if let Some(num) = key.to_num() {
-                    let (x, y) = self.window_center();
-                    let (width, heigh) = self.window_size();
+                    let (x, y) = self.window_bounds.window_center();
+                    let (width, heigh) = self.window_bounds.window_size();
                     let (width, heigh) = (width / 2, heigh / 2);
                     let (width, heigh) = (
                         width * SIDE[(num - 1) as usize].0,
@@ -263,46 +299,172 @@ impl Macro {
                 println!("{:?}", self.to_window_coords(MouseCursor::pos()));
                 self.saved_pos = pos;
             }
-            // WinSizeSelect => {
-            //     let mut buf = String::new();
-            //     io::stdin().read_line(&mut buf);
-            //     match buf
-            //         .split(" ")
-            //         .filter(|x| !x.is_empty())
-            //         .map(|x| x.parse::<i32>().unwrap())
-            //         .collect::<Vec<_>>()[..]
-            //     {
-            //         [left, top, right, bottom, ..] => {
-            //             self.win_bounds = WindowBound {
-            //                 left,
-            //                 top,
-            //                 right,
-            //                 bottom,
-            //             }
-            //         }
-            //         _ => (),
-            //     }
-            //     self.set_state(MacroState::Neutral);
-            // }
-            // WindowSizePicker => {
-            //     if key != EKey {
-            //         return;
-            //     }
-            //     let pos = MouseCursor::pos();
-            //     self.win_bounds.right = pos.0;
-            //     self.win_bounds.bottom = pos.1;
-            //     println!("Bottom right corner: {:?}", pos);
-            //     self.center_mouse();
-            //     self.set_state(Neutral);
-            // }
+            Manual => {
+                let Some((x, y)) = KeybdKey::get_arrow() else {
+                    return;
+                };
+                let (mut x, mut y) = (x as f32 * SENSITIVITY.0, y as f32 * SENSITIVITY.1);
+                if KeybdKey::is_alt() {
+                    x *= 4.;
+                    y *= 4.;
+                }
+                self.window_bounds.rel_move((x, y));
+            }
+            LanguagePicker(num) => {
+                select_menu!(
+                    LanguagePicker,
+                    num,
+                    key,
+                    (1..=2),
+                    {
+                        self.set_mode(StartMenu(1));
+                    },
+                    {}
+                );
+                // if key == Next {
+                //     self.set_mode(StartMenu(1));
+                //     return;
+                // }
+                // if let Some(num) = key.to_num() {
+                //     if (1..=2).contains(&num) == false {
+                //         return;
+                //     }
+                //     self.set_mode(LanguagePicker(num));
+                //     return;
+                // }
+                // let Some(arrow)=KeybdKey::get_arrow() else {
+                //     return;
+                // };
+                // let num = num + arrow.1;
+                // self.set_mode(LanguagePicker(num.min(2).max(1)));
+            }
+            StartMenu(num) => {
+                if key == Next {
+                    match num {
+                        1 => {
+                            self.set_mode(LoadType(1));
+                        }
+                        _ => todo!(),
+                    }
+                    return;
+                }
+                match key.to_num() {
+                    Some(num) if (1..=3).contains(&num) => {
+                        self.set_mode(StartMenu(num));
+                        return;
+                    }
+                    _ => (),
+                }
+                let Some(arrow) = KeybdKey::get_arrow() else {
+                    return;
+                };
+                let num = num + arrow.1;
+                self.set_mode(StartMenu(num.min(3).max(1)));
+            }
+            LoadType(num) => {
+                if key == Next {
+                    match num {
+                        1 => {
+                            self.set_mode(NewCharacterSelect(1));
+                        }
+                        2 => {
+                            self.set_mode(LoadCharacterSelecter(1));
+                        }
+                        3 => {
+                            self.set_mode(StartMenu(1));
+                        }
+                        _ => todo!(),
+                    }
+                    return;
+                }
+                if key == Back {
+                    self.set_mode(StartMenu(1));
+                    return;
+                }
+                match key.to_num() {
+                    Some(num) if (1..=3).contains(&num) => {
+                        self.set_mode(LoadType(num));
+                        return;
+                    }
+                    _ => (),
+                }
+                let Some(arrow) = KeybdKey::get_arrow() else {
+                    return;
+                };
+                let num = num + arrow.1;
+                self.set_mode(LoadType(num.min(3).max(1)));
+            }
+            LoadCharacterSelecter(num) => {
+                if key == Next {
+                    match num {
+                        1..=4 => {
+                            todo!()
+                        }
+                        5 => {
+                            self.set_mode(StartMenu(1));
+                        }
+                        _ => panic!(
+                            "Unexpected state: LoadCharacterSelecter must be in range 1 to 5"
+                        ),
+                    }
+                    return;
+                }
+                if key == Back {
+                    self.set_mode(StartMenu(1));
+                    return;
+                }
+                match key.to_num() {
+                    Some(num) if (1..=5).contains(&num) => {
+                        self.set_mode(LoadCharacterSelecter(num));
+                        return;
+                    }
+                    _ => (),
+                }
+                let Some(arrow) = KeybdKey::get_arrow() else {
+                    return;
+                };
+                let num = num + arrow.1;
+                self.set_mode(LoadCharacterSelecter(num.min(5).max(1)));
+            }
+            NewCharacterSelect(num) => {
+                if key == Next {
+                    match num {
+                        1..=4 => {
+                            todo!()
+                        }
+                        5 => {
+                            self.set_mode(StartMenu(1));
+                        }
+                        _ => panic!("Unexpected state: NewCharacterSelect must be in range 1 to 5"),
+                    }
+                    return;
+                }
+                if key == Back {
+                    self.set_mode(StartMenu(1));
+                    return;
+                }
+                match key.to_num() {
+                    Some(num) if (1..=5).contains(&num) => {
+                        self.set_mode(NewCharacterSelect(num));
+                        return;
+                    }
+                    _ => (),
+                }
+                let Some(arrow) = KeybdKey::get_arrow() else {
+                    return;
+                };
+                let num = num + arrow.1;
+                self.set_mode(NewCharacterSelect(num.min(5).max(1)));
+            }
+            EnterName(_) => todo!(),
             BattleAbilitySelect { character, .. } => {
                 match key {
                     BKey => {
-                        self.set_state(BattleCharacterSelection);
+                        self.set_mode(BattleCharacterSelection);
                         return;
                     }
                     VKey => {
-                        self.set_state(VictoryLoot { x: 1, y: 1 });
+                        self.set_mode(VictoryLoot { x: 1, y: 1 });
                         return;
                     }
                     _ => (),
@@ -311,14 +473,14 @@ impl Macro {
                 let Some(num)=key.to_num() else {
                     return;
                 };
-                self.set_state(BattleAbilitySelect {
+                self.set_mode(BattleAbilitySelect {
                     character,
                     ability: num,
                 });
             }
             BattleCharacterSelection => {
                 if key == VKey {
-                    self.set_state(VictoryLoot { x: 1, y: 1 });
+                    self.set_mode(VictoryLoot { x: 1, y: 1 });
                     // self.move_window_coord(VICTORY_SCREEN_ITEMS);
                     return;
                 }
@@ -331,10 +493,10 @@ impl Macro {
                         return;
                     }
                     8 => {
-                        self.set_state(BuffView);
+                        self.set_mode(BuffView);
                     }
                     1..=9 => {
-                        self.set_state(BattleAbilitySelect {
+                        self.set_mode(BattleAbilitySelect {
                             character: num,
                             ability: 5,
                         });
@@ -344,10 +506,10 @@ impl Macro {
             }
             Inventory { mut x, mut y } => {
                 if key == DKey {
-                    self.set_state(InventoryDrop(x));
+                    self.set_mode(InventoryDrop(x));
                 }
                 if key == VKey {
-                    self.set_state(VictoryLoot { x: 1, y: 1 });
+                    self.set_mode(VictoryLoot { x: 1, y: 1 });
                     return;
                 }
                 if key == BackspaceKey {
@@ -356,7 +518,7 @@ impl Macro {
                     return;
                 }
                 if key == PKey {
-                    self.set_state(InventoryProfile(1));
+                    self.set_mode(InventoryProfile(1));
                     return;
                 }
                 if let Some(arrow) = KeybdKey::get_arrow() {
@@ -366,20 +528,20 @@ impl Macro {
                     match (x, y) {
                         (_, ..=0) => return,
                         (1..=6, 1..=6) => {
-                            self.set_state(Inventory { x, y });
+                            self.set_mode(Inventory { x, y });
                         }
                         (_, 7) => {
-                            self.set_state(InventoryDrop(x));
+                            self.set_mode(InventoryDrop(x));
                             return;
                         }
                         (..=0, _) => {
                             let y = y.min(3).max(1);
-                            self.set_state(InventoryEquip { x: 3, y: y });
+                            self.set_mode(InventoryEquip { x: 3, y: y });
                             return;
                         }
                         (7.., _) => {
                             let y = y.min(3).max(1);
-                            self.set_state(InventoryEquip { x: 1, y: y });
+                            self.set_mode(InventoryEquip { x: 1, y: y });
                             return;
                         }
                         _ => return,
@@ -394,19 +556,19 @@ impl Macro {
 
                 match x {
                     1 => {
-                        self.set_state(InventoryEquip { x, y });
+                        self.set_mode(InventoryEquip { x, y });
                     }
                     2 => {
-                        self.set_state(InventoryEquip { x, y });
+                        self.set_mode(InventoryEquip { x, y });
                     }
                     3 => {
-                        self.set_state(InventoryEquip { x, y });
+                        self.set_mode(InventoryEquip { x, y });
                     }
                     ..=0 => {
-                        self.set_state(Inventory { x: 6, y: y });
+                        self.set_mode(Inventory { x: 6, y: y });
                     }
                     4.. => {
-                        self.set_state(Inventory { x: 1, y: y });
+                        self.set_mode(Inventory { x: 1, y: y });
                     }
                 }
             }
@@ -416,15 +578,15 @@ impl Macro {
                 };
                 if arrow.1 < 0 {
                     let (x, y) = (x, 6);
-                    self.set_state(Inventory { x, y });
+                    self.set_mode(Inventory { x, y });
                     return;
                 }
                 x += arrow.0;
                 if x == 7 || x == 0 {
-                    self.set_state(InventoryDrop(6));
+                    self.set_mode(InventoryDrop(6));
                     return;
                 }
-                self.set_state(InventoryProfile(x));
+                self.set_mode(InventoryProfile(x));
             }
             InventoryDrop(x) => {
                 let Some(arrow)=KeybdKey::get_arrow()else {
@@ -432,61 +594,56 @@ impl Macro {
                 };
                 match arrow {
                     (_, -1) => {
-                        self.set_state(Inventory { x: x, y: 6 });
+                        self.set_mode(Inventory { x: x, y: 6 });
                     }
                     (1, _) => {
-                        self.set_state(InventoryProfile(1));
+                        self.set_mode(InventoryProfile(1));
                     }
                     (-1, _) => {
-                        self.set_state(InventoryProfile(6));
+                        self.set_mode(InventoryProfile(6));
                     }
                     _ => (),
                 }
                 return;
             }
-            BottomTabs(_) => {
-                let Some(tab) = key.to_num() else{
+            BottomTabs(x) => {
+                if key == Next {
+                    match x {
+                        1 => {
+                            self.set_mode(Inventory { x: 1, y: 1 });
+                        }
+                        2 => {
+                            self.set_mode(AbilityTree { x: 1, y: 1 });
+                        }
+                        6 => {
+                            self.set_mode(Map(1));
+                        }
+                        7 => {
+                            todo!()
+                        }
+                        _ => return,
+                    }
+                }
+                if let Some(tab) = key.to_num() {
+                    self.set_mode(BottomTabs(tab));
                     return;
                 };
-                self.set_state(BottomTabs(tab));
-                //                 match tab {
-                //                     7 => {
-                //                         self.move_window_coord(EXIT_GAME_X);
-                //                     }
-                //                     6 => {
-                //                         self.move_window_coord(SKIP_TURN_POS);
-                //                     }
-                //                     1..=5 => {
-                //                         let offset = 0.072 * (tab - 1) as f32;
-                //                         let (x, y) = self.to_screen_coords((offset + 0.068, 0.85));
-                //                         MouseCursor::move_abs(x, y);
-                //
-                //                         if self.should_double_click() {
-                //                             left_click();
-                //                         }
-                //                     }
-                //                     _ => return,
-                //                 }
+                let Some(arrow) = KeybdKey::get_arrow() else{
+                    return;
+                };
+                let x = arrow.0 + x;
+                if (1..=7).contains(&x) {
+                    self.set_mode(BottomTabs(x));
+                }
             }
             Infinity(_) => {
-                let Some(num)=key.to_num() else {
+                let Some(num) = key.to_num() else {
                     return;
                 };
                 if num > 6 {
                     return;
                 }
-                self.set_state(Infinity(num));
-            }
-            Manual => {
-                let Some((x, y)) = KeybdKey::get_arrow() else {
-                    return;
-                };
-                let (mut x, mut y) = (x as f32 * SENSITIVITY.0, y as f32 * SENSITIVITY.1);
-                if KeybdKey::is_alt() {
-                    x *= 3.;
-                    y *= 3.;
-                }
-                self.window_bounds.rel_move((x, y));
+                self.set_mode(Infinity(num));
             }
             BuffView => {
                 if self.arrow_move(BATTLE_BUFF_OFFSET) {
@@ -497,7 +654,7 @@ impl Macro {
                 };
                 match num {
                     2 => {
-                        self.set_state(BattleCharacterSelection);
+                        self.set_mode(BattleCharacterSelection);
                     }
                     8 => return,
                     1..=9 => {
@@ -510,18 +667,18 @@ impl Macro {
             VictoryLoot { x, y } => {
                 match key {
                     VKey => {
-                        self.set_state(VictoryLoot { x: 1, y: 1 });
+                        self.set_mode(VictoryLoot { x: 1, y: 1 });
                         return;
                     }
                     IKey => {
-                        self.set_state(Inventory { x: 1, y: 1 });
+                        self.set_mode(Inventory { x: 1, y: 1 });
                         return;
                     }
                     XKey => {
-                        self.set_state(VictoryProceed(x));
+                        self.set_mode(VictoryProceed(x));
                     }
                     BKey => {
-                        self.set_state(BattleCharacterSelection);
+                        self.set_mode(BattleCharacterSelection);
                         return;
                     }
                     _ => (),
@@ -535,9 +692,9 @@ impl Macro {
                     return;
                 }
                 match (x, y) {
-                    (1..=5, _) | (_, 1..=3) => self.set_state(VictoryLoot { x: x, y: y }),
-                    (6.., _) => self.set_state(VictoryInventory { x: 1, y: y }),
-                    (_, 4..) => self.set_state(VictoryProceed(x)),
+                    (1..=5, _) | (_, 1..=3) => self.set_mode(VictoryLoot { x: x, y: y }),
+                    (6.., _) => self.set_mode(VictoryInventory { x: 1, y: y }),
+                    (_, 4..) => self.set_mode(VictoryProceed(x)),
                     _ => return,
                 }
             }
@@ -546,7 +703,7 @@ impl Macro {
                     return;
                 };
                 if arrow.1 < 0 {
-                    self.set_state(VictoryLoot { x: x, y: 3 });
+                    self.set_mode(VictoryLoot { x: x, y: 3 });
                     return;
                 }
             }
@@ -557,10 +714,10 @@ impl Macro {
                 let (x, y) = (arrow.0 + x, arrow.1 + y);
                 match (x, y) {
                     (..=0, _) => {
-                        self.set_state(VictoryLoot { x: 5, y: y.min(3) });
+                        self.set_mode(VictoryLoot { x: 5, y: y.min(3) });
                     }
                     (_, 7..) => {
-                        self.set_state(VictoryDrop(x));
+                        self.set_mode(VictoryDrop(x));
                     }
                     _ => (),
                 }
@@ -571,10 +728,10 @@ impl Macro {
                 };
                 match arrow {
                     (_, -1) => {
-                        self.set_state(VictoryInventory { x, y: 6 });
+                        self.set_mode(VictoryInventory { x, y: 6 });
                     }
                     (-1, _) => {
-                        self.set_state(VictoryProceed(5));
+                        self.set_mode(VictoryProceed(5));
                     }
                     _ => return,
                 }
@@ -592,20 +749,26 @@ impl Macro {
                     match (x, y) {
                         (_, ..=0) => return,
                         (1..=6, 1..=6) => {
-                            self.set_state(ShopInventory { x, y });
+                            self.set_mode(ShopInventory { x, y });
                         }
                         (_, 7..) => {
-                            self.set_state(ShopDropSell { x });
+                            self.set_mode(ShopDropSell { x });
                             return;
                         }
-                        (..=0, _) => {
-                            let y = y.min(3).max(1);
-                            self.set_state(InventoryEquip { x: 3, y: y });
+                        (..=0, 1..=3) => {
+                            self.set_mode(ShopEquip { x: 3, y: y });
                             return;
                         }
-                        (7.., _) => {
-                            let y = y.min(3).max(1);
-                            self.set_state(InventoryEquip { x: 1, y: y });
+                        (..=0, 4..=6) => {
+                            self.set_mode(ShopBuy { x: 5, y: y - 3 });
+                            return;
+                        }
+                        (7.., 1..=3) => {
+                            self.set_mode(ShopEquip { x: 1, y: y });
+                            return;
+                        }
+                        (7.., 4..=6) => {
+                            self.set_mode(ShopBuy { x: 1, y: y - 3 });
                             return;
                         }
                     }
@@ -619,19 +782,19 @@ impl Macro {
 
                 match x {
                     1 => {
-                        self.set_state(ShopEquip { x, y });
+                        self.set_mode(ShopEquip { x, y });
                     }
                     2 => {
-                        self.set_state(ShopEquip { x, y });
+                        self.set_mode(ShopEquip { x, y });
                     }
                     3 => {
-                        self.set_state(ShopEquip { x, y });
+                        self.set_mode(ShopEquip { x, y });
                     }
                     ..=0 => {
-                        self.set_state(ShopInventory { x: 6, y: y });
+                        self.set_mode(ShopInventory { x: 6, y: y });
                     }
                     4.. => {
-                        self.set_state(ShopInventory { x: 1, y: y });
+                        self.set_mode(ShopInventory { x: 1, y: y });
                     }
                 }
             }
@@ -641,14 +804,15 @@ impl Macro {
                 };
                 let (x, y) = (x + arrow.0, y + arrow.1);
                 match (x, y) {
+                    (_, 4..) | (_, ..=0) => return,
                     (x, _) if x < 1 => {
-                        self.set_state(ShopInventory { x: 6, y: y + 3 });
+                        self.set_mode(ShopInventory { x: 6, y: y + 3 });
                     }
                     (x, _) if x > 5 => {
-                        self.set_state(ShopInventory { x: 1, y: y + 3 });
+                        self.set_mode(ShopInventory { x: 1, y: y + 3 });
                     }
                     _ => {
-                        self.set_state(ShopBuy { x, y });
+                        self.set_mode(ShopBuy { x, y });
                     }
                 }
             }
@@ -658,25 +822,34 @@ impl Macro {
                 };
                 match arrow {
                     (1.., _) => {
-                        self.set_state(ShopDropSell { x: 6 });
+                        self.set_mode(ShopDropSell { x: 6 });
                     }
                     (_, ..=-1) => {
-                        self.set_state(ShopInventory { x: x, y: 6 });
+                        self.set_mode(ShopInventory { x: x, y: 6 });
                     }
                     (..=-1, _) => {
-                        self.set_state(ShopDropSell { x: 5 });
+                        self.set_mode(ShopDropSell { x: 5 });
                     }
                     _ => (),
                 }
             }
             AbilityTree { x, y } => {
                 if key == WKey {
-                    self.set_state(AbilityWheel(5));
+                    self.set_mode(AbilityWheel(5));
+                    return;
+                }
+                if key == SKey {
+                    self.window_bounds.move_window_coord(ABILITY_SELECT_POS);
+                    self.set_mode(AbilitySelect { x: 1 });
+                    return;
+                }
+                if key == YKey {
+                    self.set_mode(AbilityPointTable(1));
                     return;
                 }
                 let Some(arrow)=KeybdKey::get_arrow() else{
-                                return;
-                            };
+                    return;
+                };
                 let (x, y) = (x + arrow.0, y + arrow.1);
                 match (x, y) {
                     (..=0, _) | (5.., _) | (_, ..=0) | (_, 8..) => {
@@ -684,35 +857,67 @@ impl Macro {
                     }
                     _ => (),
                 }
-                self.set_state(AbilityTree { x: x, y: y });
+                self.set_mode(AbilityTree { x: x, y: y });
             }
             AbilityWheel(_) => {
-                if key == WKey {
-                    self.set_state(AbilityPointTable(1));
+                if key == AKey {
+                    self.set_mode(AbilityTree { x: 1, y: 1 });
                     return;
                 }
+                if key == SKey {
+                    self.window_bounds.move_window_coord(ABILITY_SELECT_POS);
+                    self.set_mode(AbilitySelect { x: 1 });
+                    return;
+                }
+                if key == YKey {
+                    self.set_mode(AbilityPointTable(1));
+                    return;
+                }
+
                 self.window_bounds.move_window_coord(ABILITY_WHEEL_CENTER);
                 // ability select.
                 let Some(num)=key.to_num() else {
                     return;
                 };
-                self.set_state(AbilityWheel(num));
+                self.set_mode(AbilityWheel(num));
             }
             AbilityPointTable(num) => {
-                if key == WKey {
+                if key == SKey {
                     self.window_bounds.move_window_coord(ABILITY_SELECT_POS);
-                    self.set_state(AbilitySelect { x: 1 });
+                    self.set_mode(AbilitySelect { x: 1 });
                     return;
                 }
+                if key == AKey {
+                    self.set_mode(AbilityTree { x: 1, y: 1 });
+                    return;
+                }
+                if key == WKey {
+                    self.set_mode(AbilityWheel(5));
+                    return;
+                }
+
                 match (key.to_num(), KeybdKey::get_arrow()) {
                     (_, Some((_, y))) if (1..5).contains(&(y + num)) => {
-                        self.set_state(AbilityPointTable(y + num));
+                        self.set_mode(AbilityPointTable(y + num));
                     }
-                    (Some(num), _) if num < 5 => self.set_state(AbilityPointTable(num)),
+                    (Some(num), _) if num < 5 => self.set_mode(AbilityPointTable(num)),
                     _ => return,
                 }
             }
             AbilitySelect { x } => {
+                if key == AKey {
+                    self.set_mode(AbilityTree { x: 1, y: 1 });
+                    return;
+                }
+                if key == WKey {
+                    self.set_mode(AbilityWheel(5));
+                    return;
+                }
+                if key == YKey {
+                    self.set_mode(AbilityPointTable(1));
+                    return;
+                }
+
                 let Some(arrow) = KeybdKey::get_arrow() else {
                     return;
                 };
@@ -724,10 +929,10 @@ impl Macro {
                 let x = x + arrow.0;
                 match x {
                     3.. => {
-                        self.set_state(AbilitySelectSlider(1));
+                        self.set_mode(AbilitySelectSlider(1));
                     }
                     1 | 2 => {
-                        self.set_state(AbilitySelect { x: x });
+                        self.set_mode(AbilitySelect { x: x });
                     }
                     _ => return,
                 }
@@ -738,17 +943,32 @@ impl Macro {
                 };
                 let y = y + arrow.1;
                 match y {
-                    1 => self.set_state(AbilitySelectSlider(1)),
-                    2 => self.set_state(AbilitySelectSlider(2)),
+                    1 => self.set_mode(AbilitySelectSlider(1)),
+                    2 => self.set_mode(AbilitySelectSlider(2)),
                     _ => return,
                 }
             }
+            WhiteNovember(_) => {
+                let Some(num)=key.to_num() else {
+                    return;
+                };
+                if (1..=2).contains(&num) {
+                    self.set_mode(WhiteNovember(num));
+                }
+            }
+            GhostBeach(_) => {
+                let Some(num)=key.to_num() else {
+                    return;
+                };
+                if (1..=2).contains(&num) {
+                    self.set_mode(WhiteNovember(num));
+                }
+            }
+            Map(_) => match key.to_num() {
+                Some(num) if (1..=4).contains(&num) => self.set_mode(Map(num)),
+                _ => return,
+            },
         }
-    }
-
-    fn ability_wheel(&mut self, num: i32) {
-        let (x, y) = ABILITY_WHEEL_OFFSETS[num as usize - 1];
-        self.window_bounds.rel_move((x, y));
     }
     // fn move_to_shop_sell(&mut self, x: i32) {
     //     if x == 6 {
@@ -765,31 +985,18 @@ impl Macro {
         }
         false
     }
-    fn should_double_click(&self) -> bool {
-        KeybdKey::is_alt() != self.auto_left_click
-    }
     // fn move_window_coord(&mut self, coord: (f32, f32)) {
     //     let (x, y) = self.to_screen_coords(coord);
     //     MouseCursor::move_abs(x, y);
     // }
-    fn set_state(&mut self, state: MacroState) {
+    fn set_mode(&mut self, state: MacroMode) {
         state.move_mouse(self.window_bounds);
-        self.state = state;
+        self.mode = state;
         println!("{:?} State", state);
     }
     fn skip_turn(&mut self) {
         self.window_bounds.move_window_coord(SKIP_TURN_POS);
-        if !self.should_double_click() {
-            return;
-        }
         left_click()
-    }
-
-    fn window_size(&self) -> (i32, i32) {
-        self.window_bounds.window_size()
-    }
-    fn window_center(&self) -> (i32, i32) {
-        self.window_bounds.window_center()
     }
     fn to_screen_coords(&self, coord: (f32, f32)) -> (i32, i32) {
         self.window_bounds.to_screen_coords(coord)
@@ -836,12 +1043,29 @@ impl WindowBound {
         MouseCursor::move_abs(x, y);
     }
 }
-impl MacroState {
+impl MacroMode {
     pub fn move_mouse(&self, window: WindowBound) {
         match *self {
             Neutral => window.center_mouse(),
-            Infinity(x) => {
-                window.move_window_coord(INFINITY_OVERWORLD[(x - 1) as usize]);
+            LanguagePicker(num) => {
+                select_move(window, num, LANGUAGE_POS);
+                // window.move_window_coord(LANGUAGE_POS[(num - 1) as usize]);
+            }
+            StartMenu(num) => {
+                window.move_window_coord(START_MENU[(num - 1) as usize]);
+            }
+            LoadType(num) => {
+                window.move_window_coord(GAME_LOAD_TYPE[(num - 1) as usize]);
+            }
+            LoadCharacterSelecter(num) => {
+                select_move(window, num, SAVE_SELECT);
+            }
+            NewCharacterSelect(num) => {
+                select_move(window, num, SAVE_SELECT);
+            }
+            EnterName(num) => select_move(window, num, ENTER_NAME_HERE),
+            Infinity(num) => {
+                window.move_window_coord(INFINITY_OVERWORLD[(num - 1) as usize]);
             }
             BuffView => {
                 window.move_window_coord(BATTLE_BUFF_CENTER_POS);
@@ -955,9 +1179,16 @@ impl MacroState {
                 window.rel_move((0., y));
             }
             DebugState | Manual => (),
-            _ => (),
+            WhiteNovember(_) => todo!(),
+            GhostBeach(_) => todo!(),
+            Map(num) => {
+                window.move_window_coord(MAP[(num - 1) as usize]);
+            }
         }
     }
+}
+fn select_move<const N: usize>(window: WindowBound, index: i32, positon: [(f32, f32); N]) {
+    window.move_window_coord(positon[(index - 1) as usize]);
 }
 fn offset(steps: (i32, i32), offset: (f32, f32)) -> (f32, f32) {
     (
